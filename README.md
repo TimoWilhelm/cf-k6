@@ -231,12 +231,19 @@ npm run deploy   # wrangler deploy (builds and pushes the runner image)
 npm test         # vitest + @cloudflare/vitest-pool-workers
 npm run test:e2e # local wrangler dev + container-sharded k6 archive test
 npm run test:remote # authenticated remote 3-shard Container run
+npm run test:remote:cli # stock k6 cloud CLI against the deployed Worker
 ```
 
 `npm run test:remote` reads `BASIC_AUTH_USER` and `BASIC_AUTH_PASS` from `.env`
 or `process.env`, targets `https://container-loadtester.tiwicf.workers.dev` by
 default, creates a k6 archive, starts a remote run with three Container
 shards, waits for completion, and verifies per-shard k6 result artifacts.
+
+`npm run test:remote:cli` starts from an empty/fresh deployment state and uses
+the stock k6 CLI protocol instead of the platform REST API. It reads the same
+auth variables from `.env`, sets `K6_CLOUD_TOKEN`, `K6_CLOUD_HOST_V6`, and
+`K6_CLOUD_LOGS_TAIL_URL`, then runs `k6 cloud run --show-logs` with the
+3-shard no-load script at `test/e2e/cloud-no-load.k6.js`.
 
 Override the target, region, or timeout if needed:
 
