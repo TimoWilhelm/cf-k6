@@ -1,9 +1,10 @@
 import { spawn } from "node:child_process";
-import { readDotEnv } from "./platform-e2e.mjs";
+import { fileURLToPath } from "node:url";
+import { readDotEnv } from "../shared/platform-e2e.mjs";
 
 const env = { ...process.env, ...await readDotEnv(".env") };
 const baseUrl = trimTrailingSlash(env.REMOTE_BASE_URL ?? "https://container-loadtester.tiwicf.workers.dev");
-const script = env.K6_CLOUD_TEST_SCRIPT ?? "test/e2e/cloud-no-load.k6.js";
+const script = env.K6_CLOUD_TEST_SCRIPT ?? fileURLToPath(new URL("./no-load.k6.js", import.meta.url));
 const username = env.BASIC_AUTH_USER;
 const password = env.BASIC_AUTH_PASS;
 

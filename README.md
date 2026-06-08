@@ -234,6 +234,13 @@ npm run test:remote # authenticated remote 3-shard Container run
 npm run test:remote:cli # stock k6 cloud CLI against the deployed Worker
 ```
 
+The e2e tests are grouped by entrypoint:
+
+- `test/e2e/local/` contains the local wrangler-dev runner and its k6 script.
+- `test/e2e/remote/` contains the remote REST API runner and its k6 script.
+- `test/e2e/remote-k6-cli/` contains the stock `k6 cloud run` runner and its no-load script.
+- `test/e2e/shared/` contains helper code shared by the local and remote REST API runners.
+
 `npm run test:remote` reads `BASIC_AUTH_USER` and `BASIC_AUTH_PASS` from `.env`
 or `process.env`, targets `https://container-loadtester.tiwicf.workers.dev` by
 default, creates a k6 archive, starts a remote run with three Container
@@ -243,7 +250,7 @@ shards, waits for completion, and verifies per-shard k6 result artifacts.
 the stock k6 CLI protocol instead of the platform REST API. It reads the same
 auth variables from `.env`, sets `K6_CLOUD_TOKEN`, `K6_CLOUD_HOST_V6`, and
 `K6_CLOUD_LOGS_TAIL_URL`, then runs `k6 cloud run --show-logs` with the
-3-shard no-load script at `test/e2e/cloud-no-load.k6.js`.
+3-shard no-load script at `test/e2e/remote-k6-cli/no-load.k6.js`.
 
 Override the target, region, or timeout if needed:
 

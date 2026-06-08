@@ -6,14 +6,14 @@ import { spawn } from "node:child_process";
 const SHARDS = 3;
 const MIN_EXPECTED_REQUESTS = 15;
 
-export async function runPlatformE2E({ baseUrl, auth, region = "ENAM", timeoutMs = 600_000, label = "e2e" }) {
+export async function runPlatformE2E({ baseUrl, auth, script, region = "ENAM", timeoutMs = 600_000, label = "e2e" }) {
 	const workdir = await mkdtemp(join(tmpdir(), "container-loadtester-e2e-"));
-	const script = resolve("test/e2e/example.com.k6.js");
+	const resolvedScript = resolve(script);
 	const archive = join(workdir, "archive.tar");
 
 	try {
 		await assertK6Available();
-		await runRequired("k6", ["archive", script, "-O", archive]);
+		await runRequired("k6", ["archive", resolvedScript, "-O", archive]);
 		await waitForApi(baseUrl, auth);
 
 		const createResponse = await fetch(`${baseUrl}/v1/tests?regions=${encodeURIComponent(region)}&shardsPerRegion=${SHARDS}`, {

@@ -7,9 +7,9 @@
 		"deploy": "wrangler deploy",
 		"start": "wrangler dev",
 		"test": "vitest",
-		"test:e2e": "node test/e2e/run-k6-local.mjs",
-		"test:remote": "node test/e2e/run-k6-remote.mjs",
-		"test:remote:cli": "node test/e2e/run-k6-cloud-remote.mjs",
+		"test:e2e": "node test/e2e/local/run.mjs",
+		"test:remote": "node test/e2e/remote/run.mjs",
+		"test:remote:cli": "node test/e2e/remote-k6-cli/run.mjs",
 		"cf-typegen": "wrangler types"
 	},
 	"dependencies": {
