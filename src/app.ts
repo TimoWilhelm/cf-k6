@@ -1,6 +1,8 @@
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { requireBasicAuth, type Variables } from "./auth";
+import cloudV6 from "./cloudv6";
+import { handleCloudLogs } from "./cloudlogs";
 import { RunNotFound, type StatusPatch } from "./coordinator";
 import { openApiDocument } from "./openapi";
 import { normalizeSpec, SpecError } from "./shards";
@@ -13,6 +15,9 @@ const app = new Hono<AppEnv>();
 const coordinator = (env: Env) => env.RUN_COORDINATOR.getByName("runs");
 
 app.get("/openapi.json", () => Response.json(openApiDocument()));
+
+app.route("/", cloudV6);
+app.get("/api/v1/tail", (c) => handleCloudLogs(c.req.raw, c.env));
 
 // Everything below requires HTTP Basic Auth.
 app.use("/v1/*", requireBasicAuth);

@@ -1,8 +1,11 @@
 import { getContainer } from "@cloudflare/containers";
 import { DurableObject } from "cloudflare:workers";
+import { readArchiveMetadata } from "./archive";
+import { archiveSpecFromOptions } from "./distribution";
 import { consumeNdjson, mergeLiveMetrics, SummaryAccumulator, type MergedMetrics } from "./metrics";
 import { runnerNamespace } from "./runners";
 import { buildShards } from "./shards";
+import { evaluateThresholds, type SummaryExport, type ThresholdEvaluation } from "./thresholds";
 import type { RunRecord, RunStatus, Shard, ShardStatus, TestSpec } from "./types";
 
 /** Native k6 `/v1/status` PATCH body (pause/resume/scale/stop). */
@@ -24,6 +27,29 @@ type Row = {
 	spec_json: string;
 	shards_json: string;
 };
+
+type CloudLoadTestRow = {
+	id: number;
+	project_id: number;
+	name: string;
+	created_at: string;
+	updated_at: string;
+};
+
+type CloudTestRunRow = {
+	test_run_id: number;
+	load_test_id: number;
+	run_id: string;
+	project_id: number;
+	created_at: string;
+	started_at: string;
+	updated_at: string;
+	estimated_seconds: number;
+	result: string | null;
+	thresholds_json: string;
+};
+
+type StatusEvent = { type: string; entered: string; extra?: { by_user?: string; message?: string; code?: number } };
 
 /** k6 `/v1/status` JSON:API shape, aggregated across shards. */
 export type AggregateStatus = {
@@ -51,7 +77,45 @@ export class RunCoordinator extends DurableObject<Env> {
 					shards_json TEXT NOT NULL
 				)
 			`);
+			this.ctx.storage.sql.exec(`
+				CREATE TABLE IF NOT EXISTS cloud_load_tests (
+					id INTEGER PRIMARY KEY AUTOINCREMENT,
+					project_id INTEGER NOT NULL,
+					name TEXT NOT NULL,
+					created_at TEXT NOT NULL,
+					updated_at TEXT NOT NULL
+				)
+			`);
+			this.ctx.storage.sql.exec(`
+				CREATE TABLE IF NOT EXISTS cloud_test_runs (
+					test_run_id INTEGER PRIMARY KEY AUTOINCREMENT,
+					load_test_id INTEGER NOT NULL,
+					run_id TEXT NOT NULL,
+					project_id INTEGER NOT NULL,
+					created_at TEXT NOT NULL,
+					started_at TEXT NOT NULL,
+					updated_at TEXT NOT NULL,
+					estimated_seconds INTEGER NOT NULL,
+					result TEXT,
+					thresholds_json TEXT NOT NULL
+				)
+			`);
 		});
+	}
+
+	fetch(request: Request): Response | Promise<Response> {
+		const url = new URL(request.url);
+		if (url.pathname !== "/api/v1/tail") return Response.json({ error: "not found" }, { status: 404 });
+		if (request.headers.get("upgrade")?.toLowerCase() !== "websocket") {
+			return Response.json({ error: "websocket upgrade required" }, { status: 426 });
+		}
+		const testRunId = testRunIdFromLogQuery(url.searchParams.get("query"));
+		if (!testRunId) return Response.json({ error: "missing test_run_id query" }, { status: 400 });
+
+		const pair = new WebSocketPair();
+		const [client, server] = Object.values(pair) as [WebSocket, WebSocket];
+		this.ctx.acceptWebSocket(server, [`test_run:${testRunId}`]);
+		return new Response(null, { status: 101, webSocket: client });
 	}
 
 	async createRun(spec: TestSpec, createdBy: string): Promise<RunRecord> {
@@ -71,6 +135,74 @@ export class RunCoordinator extends DurableObject<Env> {
 			httpMetadata: { contentType: "application/json" },
 		});
 		return run;
+	}
+
+	async createCloudLoadTest(projectId: number, name: string, archive: ArrayBuffer): Promise<Record<string, unknown>> {
+		const now = new Date().toISOString();
+		this.ctx.storage.sql.exec(
+			"INSERT INTO cloud_load_tests (project_id, name, created_at, updated_at) VALUES (?, ?, ?, ?)",
+			projectId || 1,
+			name,
+			now,
+			now,
+		);
+		const row = this.ctx.storage.sql.exec<CloudLoadTestRow>("SELECT * FROM cloud_load_tests ORDER BY id DESC LIMIT 1").one();
+		await this.env.ARTIFACTS.put(`cloud/load-tests/${row.id}/archive.tar`, archive, {
+			httpMetadata: { contentType: "application/x-tar" },
+		});
+		return loadTestModel(row);
+	}
+
+	async updateCloudLoadTestScript(loadTestId: number, archive: ArrayBuffer): Promise<void> {
+		const row = this.cloudLoadTest(loadTestId);
+		const now = new Date().toISOString();
+		await this.env.ARTIFACTS.put(`cloud/load-tests/${row.id}/archive.tar`, archive, {
+			httpMetadata: { contentType: "application/x-tar" },
+		});
+		this.ctx.storage.sql.exec("UPDATE cloud_load_tests SET updated_at = ? WHERE id = ?", now, row.id);
+	}
+
+	async startCloudTestRun(loadTestId: number, requestUrl: string): Promise<Record<string, unknown>> {
+		const loadTest = this.cloudLoadTest(loadTestId);
+		const archive = await this.env.ARTIFACTS.get(`cloud/load-tests/${loadTest.id}/archive.tar`);
+		if (!archive) throw new Error("cloud load test archive not found");
+		const archiveBytes = await archive.arrayBuffer();
+		const metadata = readArchiveMetadata(archiveBytes);
+		const spec = archiveSpecFromOptions(metadata.options, metadata.env);
+		const run = await this.createRun(spec, "cloud");
+		await this.env.ARTIFACTS.put(`runs/${run.id}/archive.tar`, archiveBytes, { httpMetadata: { contentType: "application/x-tar" } });
+
+		const now = new Date().toISOString();
+		this.ctx.storage.sql.exec(
+			`INSERT INTO cloud_test_runs
+			 (load_test_id, run_id, project_id, created_at, started_at, updated_at, estimated_seconds, result, thresholds_json)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			loadTest.id,
+			run.id,
+			loadTest.project_id,
+			now,
+			now,
+			now,
+			estimatedSeconds(metadata.options),
+			null,
+			JSON.stringify(metadata.options?.thresholds ?? {}),
+		);
+		const cloudRun = this.ctx.storage.sql.exec<CloudTestRunRow>("SELECT * FROM cloud_test_runs ORDER BY test_run_id DESC LIMIT 1").one();
+		await startWorkflow(this.env, run.id);
+		return this.cloudTestRunModel(cloudRun, run, requestUrl, true);
+	}
+
+	async getCloudTestRun(testRunId: number, requestUrl: string): Promise<Record<string, unknown>> {
+		const cloudRun = this.cloudTestRun(testRunId);
+		const run = await this.require(cloudRun.run_id);
+		return this.cloudTestRunModel(cloudRun, run, requestUrl, false);
+	}
+
+	async abortCloudTestRun(testRunId: number): Promise<void> {
+		const cloudRun = this.cloudTestRun(testRunId);
+		await this.stopRun(cloudRun.run_id);
+		const now = new Date().toISOString();
+		this.ctx.storage.sql.exec("UPDATE cloud_test_runs SET updated_at = ?, result = COALESCE(result, 'error') WHERE test_run_id = ?", now, testRunId);
 	}
 
 	async listRuns(): Promise<RunRecord[]> {
@@ -171,12 +303,29 @@ export class RunCoordinator extends DurableObject<Env> {
 			if (object) await consumeNdjson(object.body, accumulator);
 		}
 
-		await this.env.ARTIFACTS.put(`runs/${run.id}/summary.json`, JSON.stringify(accumulator.toSummaryExport(), null, 2), {
+		const summary = accumulator.toSummaryExport();
+		await this.env.ARTIFACTS.put(`runs/${run.id}/summary.json`, JSON.stringify(summary, null, 2), {
 			httpMetadata: { contentType: "application/json" },
 		});
 
+		const cloudRun = this.findCloudRunByRunId(run.id);
+		let evaluation: ThresholdEvaluation | null = null;
+		if (cloudRun) {
+			evaluation = evaluateThresholds(run.spec.options, summary);
+			this.broadcastCloudLogs(cloudRun.test_run_id, renderSummaryText(summary, evaluation));
+		}
+
 		run.status = run.shards.every((shard) => shard.status === "completed") ? "completed" : "failed";
 		this.touch(run);
+		if (cloudRun) {
+			const result = run.status === "completed" ? (evaluation?.passed === false ? "failed" : "passed") : "error";
+			this.ctx.storage.sql.exec(
+				"UPDATE cloud_test_runs SET updated_at = ?, result = ? WHERE test_run_id = ?",
+				run.updatedAt,
+				result,
+				cloudRun.test_run_id,
+			);
+		}
 		return run;
 	}
 
@@ -346,6 +495,61 @@ export class RunCoordinator extends DurableObject<Env> {
 			JSON.stringify(run.shards),
 		);
 	}
+
+	private cloudLoadTest(id: number): CloudLoadTestRow {
+		const rows = this.ctx.storage.sql.exec<CloudLoadTestRow>("SELECT * FROM cloud_load_tests WHERE id = ?", id).toArray();
+		if (!rows.length) throw new Error(`cloud load test not found: ${id}`);
+		return rows[0];
+	}
+
+	private cloudTestRun(id: number): CloudTestRunRow {
+		const rows = this.ctx.storage.sql.exec<CloudTestRunRow>("SELECT * FROM cloud_test_runs WHERE test_run_id = ?", id).toArray();
+		if (!rows.length) throw new Error(`cloud test run not found: ${id}`);
+		return rows[0];
+	}
+
+	private findCloudRunByRunId(runId: string): CloudTestRunRow | null {
+		const rows = this.ctx.storage.sql.exec<CloudTestRunRow>("SELECT * FROM cloud_test_runs WHERE run_id = ?", runId).toArray();
+		return rows[0] ?? null;
+	}
+
+	private cloudTestRunModel(cloudRun: CloudTestRunRow, run: RunRecord, requestUrl: string, includeDetailsUrl: boolean): Record<string, unknown> {
+		const status = cloudStatus(run.status);
+		const history = statusHistory(cloudRun, run);
+		const model: Record<string, unknown> = {
+			id: cloudRun.test_run_id,
+			test_run_id: cloudRun.test_run_id,
+			test_id: cloudRun.load_test_id,
+			project_id: cloudRun.project_id,
+			started_by: null,
+			created: cloudRun.created_at,
+			ended: status === "completed" || status === "aborted" ? run.updatedAt : null,
+			note: "",
+			retention_expiry: null,
+			cost: null,
+			status,
+			status_details: history[history.length - 1] ?? { type: status, entered: cloudRun.updated_at },
+			status_history: history,
+			distribution: [],
+			result: cloudRun.result ?? (status === "completed" ? (run.status === "failed" ? "error" : "passed") : ""),
+			result_details: {},
+			options: run.spec.options ?? {},
+			k6_dependencies: {},
+			k6_versions: {},
+			max_vus: maxVus(run.spec.options),
+			max_browser_vus: 0,
+			estimated_duration: cloudRun.estimated_seconds,
+			execution_duration: executionSeconds(cloudRun.started_at, run.updatedAt, run.status === "running" || run.status === "starting"),
+		};
+		if (includeDetailsUrl) model.test_run_details_page_url = summaryUrl(requestUrl, run.id);
+		return model;
+	}
+
+	private broadcastCloudLogs(testRunId: number, lines: string[]): void {
+		for (const ws of this.ctx.getWebSockets(`test_run:${testRunId}`)) {
+			for (const line of lines) ws.send(logFrame(line));
+		}
+	}
 }
 
 export class RunNotFound extends Error {
@@ -373,6 +577,120 @@ function rowToRun(row: Row): RunRecord {
 		spec: JSON.parse(row.spec_json) as TestSpec,
 		shards: JSON.parse(row.shards_json) as Shard[],
 	};
+}
+
+function loadTestModel(row: CloudLoadTestRow): Record<string, unknown> {
+	return { id: row.id, project_id: row.project_id, name: row.name, baseline_test_run_id: null, created: row.created_at, updated: row.updated_at };
+}
+
+function cloudStatus(status: RunStatus): string {
+	switch (status) {
+		case "created": return "created";
+		case "starting": return "initializing";
+		case "running": return "running";
+		case "stopping": return "aborted";
+		case "completed":
+		case "failed": return "completed";
+	}
+}
+
+function statusHistory(cloudRun: CloudTestRunRow, run: RunRecord): StatusEvent[] {
+	const history: StatusEvent[] = [{ type: "created", entered: cloudRun.created_at }, { type: "running", entered: cloudRun.started_at }];
+	if (run.status === "completed" || run.status === "failed") history.push({ type: "completed", entered: run.updatedAt });
+	if (run.status === "stopping") history.push({ type: "aborted", entered: run.updatedAt, extra: { by_user: "cloud-cli" } });
+	return history;
+}
+
+function executionSeconds(startedAt: string, updatedAt: string, live: boolean): number {
+	const start = Date.parse(startedAt);
+	if (!Number.isFinite(start)) return 0;
+	const end = live ? Date.now() : Date.parse(updatedAt);
+	return Number.isFinite(end) ? Math.max(0, Math.floor((end - start) / 1000)) : 0;
+}
+
+function estimatedSeconds(options: unknown): number {
+	const opts = (options ?? {}) as Record<string, any>;
+	if (typeof opts.duration === "string") return parseK6Duration(opts.duration);
+	if (Array.isArray(opts.stages)) return sumDurations(opts.stages.map((stage: any) => stage?.duration));
+	if (opts.scenarios && typeof opts.scenarios === "object") {
+		let max = 0;
+		for (const scenario of Object.values(opts.scenarios) as Array<Record<string, any>>) {
+			let total = parseK6Duration(String(scenario.startTime ?? "0s"));
+			if (typeof scenario.duration === "string") total += parseK6Duration(scenario.duration);
+			else if (Array.isArray(scenario.stages)) total += sumDurations(scenario.stages.map((stage: any) => stage?.duration));
+			max = Math.max(max, total);
+		}
+		if (max > 0) return max;
+	}
+	return 0;
+}
+
+function maxVus(options: unknown): number {
+	const opts = (options ?? {}) as Record<string, any>;
+	if (typeof opts.vus === "number") return opts.vus;
+	if (opts.scenarios && typeof opts.scenarios === "object") {
+		let max = 0;
+		for (const scenario of Object.values(opts.scenarios) as Array<Record<string, any>>) {
+			if (typeof scenario.vus === "number") max = Math.max(max, scenario.vus);
+			if (Array.isArray(scenario.stages)) {
+				for (const stage of scenario.stages as Array<Record<string, any>>) if (typeof stage.target === "number") max = Math.max(max, stage.target);
+			}
+		}
+		return max;
+	}
+	if (Array.isArray(opts.stages)) return Math.max(0, ...opts.stages.map((stage: any) => Number(stage?.target) || 0));
+	return 0;
+}
+
+function sumDurations(values: unknown[]): number {
+	return values.reduce<number>((total, value) => total + (typeof value === "string" ? parseK6Duration(value) : 0), 0);
+}
+
+function parseK6Duration(value: string): number {
+	let total = 0;
+	const unitSeconds: Record<string, number> = { ns: 1e-9, us: 1e-6, ms: 1e-3, s: 1, m: 60, h: 3600 };
+	for (const match of value.matchAll(/(\d+(?:\.\d+)?)(ns|us|ms|s|m|h)/g)) total += Number(match[1]) * unitSeconds[match[2]];
+	return Math.ceil(total);
+}
+
+function renderSummaryText(summary: SummaryExport, evaluation: ThresholdEvaluation): string[] {
+	const lines = ["", "aggregated k6 summary (all remote shards)", "========================================"];
+	for (const [name, stats] of Object.entries(summary.metrics).sort(([a], [b]) => a.localeCompare(b))) {
+		lines.push(`${name}: ${Object.entries(stats).map(([key, value]) => `${key}=${formatMetric(value)}`).join(" ")}`);
+	}
+	if (Object.keys(evaluation.results).length > 0) {
+		lines.push("", "thresholds");
+		for (const [metric, results] of Object.entries(evaluation.results)) {
+			for (const [expression, passed] of Object.entries(results)) lines.push(`${passed ? "PASS" : "FAIL"} ${metric} ${expression}`);
+		}
+	}
+	return lines;
+}
+
+function formatMetric(value: number): string {
+	return Number.isInteger(value) ? String(value) : value.toFixed(6).replace(/0+$/, "").replace(/\.$/, "");
+}
+
+function logFrame(line: string): string {
+	return JSON.stringify({ streams: [{ stream: { level: "info" }, values: [[String(Date.now() * 1_000_000), line]] }] });
+}
+
+function testRunIdFromLogQuery(query: string | null): number | null {
+	const match = query?.match(/test_run_id\s*=\s*"?(\d+)"?/);
+	return match ? Number(match[1]) : null;
+}
+
+function summaryUrl(requestUrl: string, runId: string): string {
+	const url = new URL(requestUrl);
+	return `${url.origin}/v1/tests/${runId}/summary`;
+}
+
+async function startWorkflow(env: Env, runId: string): Promise<void> {
+	try {
+		await env.K6_RUN_WORKFLOW.create({ id: runId, params: { runId } });
+	} catch {
+		await env.K6_RUN_WORKFLOW.get(runId);
+	}
 }
 
 function k6Request(path: string, init?: RequestInit): Request {

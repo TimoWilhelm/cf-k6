@@ -87,6 +87,71 @@ All endpoints require HTTP Basic Auth except `GET /openapi.json`.
 | `GET` | `/v1/tests/{id}/shards/{shard}/results` | Raw k6 JSON output for one shard |
 | `*` | `/v1/tests/{id}/shards/{shard}/k6/v1/{path}` | Passthrough to one shard's native k6 REST API |
 
+## Stock k6 CLI cloud execution
+
+The Worker also implements the subset of k6's `/cloud/v6` API used by the
+stock `k6 cloud run` command, so the normal k6 CLI can upload a standard k6
+archive, start the remote sharded Container runtime, poll progress, and receive
+the exact merged summary as cloud log output.
+
+Authentication reuses the existing Basic Auth credential as a bearer token:
+
+```bash
+export K6_CLOUD_TOKEN="$BASIC_AUTH_USER:$BASIC_AUTH_PASS"
+export K6_CLOUD_STACK_ID=1
+export K6_CLOUD_PROJECT_ID=1
+export K6_CLOUD_HOST_V6="https://loadtester.example.com"
+export K6_CLOUD_LOGS_TAIL_URL="wss://loadtester.example.com/api/v1/tail"
+
+k6 cloud run script.js
+```
+
+This targets the k6 `/cloud/v6` client used by current k6 v1.x/v2.x releases.
+Because this is an internal Grafana Cloud API surface, pin the k6 version used
+in CI and production.
+
+### CLI distribution options
+
+Use the platform region names directly as k6 cloud load zones. The custom
+`shardsPerRegion` option controls how many execution-segment shards are created
+per selected region.
+
+```js
+export const options = {
+  cloud: {
+    distribution: {
+      ENAM: { loadZone: 'ENAM', percent: 50 },
+      WEUR: { loadZone: 'WEUR', percent: 50 },
+    },
+    shardsPerRegion: 2,
+  },
+  thresholds: {
+    http_req_failed: ['rate<0.01'],
+    http_req_duration: ['p(95)<500'],
+  },
+};
+```
+
+If `options.cloud.distribution` is omitted, the run defaults to `ENAM` with one
+shard. Supported load zones are `ENAM`, `WNAM`, `EEUR`, `WEUR`, `APAC`, and
+`SAM`. The `percent` values are accepted for k6 compatibility; the current
+runtime splits work uniformly across the selected shards.
+
+### CLI aggregated output
+
+The stock k6 CLI does not render the local summary table for cloud execution.
+Instead, this platform streams the exact merged end-of-test summary over k6's
+cloud-log WebSocket, so the aggregate stats appear directly in the terminal.
+Thresholds are evaluated against the exact merged summary and drive the normal
+k6 cloud exit behavior: failed thresholds cause `k6 cloud run` to exit non-zero.
+
+The same exact summary remains available through the existing API:
+
+```bash
+curl -u "$BASIC_AUTH_USER:$BASIC_AUTH_PASS" \
+  "https://loadtester.example.com/v1/tests/<run-id>/summary"
+```
+
 ### Create from an inline script
 
 ```bash
