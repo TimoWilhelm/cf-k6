@@ -106,6 +106,7 @@ out
 
 .nuxt
 dist
+.astro/
 
 # Gatsby files
 

@@ -1,0 +1,42 @@
+{
+	"$schema": "node_modules/wrangler/config-schema.json",
+	"name": "container-loadtester-test",
+	"main": "src/index.ts",
+	"compatibility_date": "2026-06-05",
+	"compatibility_flags": ["nodejs_compat"],
+	"vars": {
+		"BASIC_AUTH_USER": "test-user",
+		"BASIC_AUTH_PASS": "test-pass"
+	},
+	"r2_buckets": [
+		{
+			"binding": "ARTIFACTS",
+			"bucket_name": "container-loadtester-artifacts-test"
+		}
+	],
+	"workflows": [
+		{
+			"name": "container-loadtester-run-test",
+			"binding": "K6_RUN_WORKFLOW",
+			"class_name": "K6RunWorkflow",
+			"limits": { "steps": 25000 }
+		}
+	],
+	"durable_objects": {
+		"bindings": [
+			{ "name": "RUN_COORDINATOR", "class_name": "RunCoordinator" },
+			{ "name": "K6_RUNNER_ENAM", "class_name": "K6RunnerENAM" },
+			{ "name": "K6_RUNNER_WNAM", "class_name": "K6RunnerWNAM" },
+			{ "name": "K6_RUNNER_EEUR", "class_name": "K6RunnerEEUR" },
+			{ "name": "K6_RUNNER_WEUR", "class_name": "K6RunnerWEUR" },
+			{ "name": "K6_RUNNER_APAC", "class_name": "K6RunnerAPAC" },
+			{ "name": "K6_RUNNER_SAM", "class_name": "K6RunnerSAM" }
+		]
+	},
+	"migrations": [
+		{
+			"tag": "v1",
+			"new_sqlite_classes": ["RunCoordinator", "K6RunnerENAM", "K6RunnerWNAM", "K6RunnerEEUR", "K6RunnerWEUR", "K6RunnerAPAC", "K6RunnerSAM"]
+		}
+	]
+}

@@ -3,11 +3,16 @@
 	"version": "0.0.0",
 	"private": true,
 	"scripts": {
-		"deploy": "wrangler deploy",
 		"dev": "wrangler dev",
+		"deploy": "wrangler deploy",
 		"start": "wrangler dev",
 		"test": "vitest",
+		"test:e2e": "node test/e2e/run-k6-local.mjs",
 		"cf-typegen": "wrangler types"
+	},
+	"dependencies": {
+		"@cloudflare/containers": "^0.0.25",
+		"hono": "^4.6.14"
 	},
 	"devDependencies": {
 		"@cloudflare/vitest-pool-workers": "^0.12.4",
