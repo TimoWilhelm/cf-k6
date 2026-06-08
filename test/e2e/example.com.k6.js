@@ -1,21 +1,22 @@
-import { check } from "k6";
+import { check, sleep } from "k6";
 import http from "k6/http";
 
 export const options = {
-	vus: 1,
-	iterations: 1,
+	vus: 3,
+	duration: "10s",
 	insecureSkipTLSVerify: true,
+	thresholds: {
+		http_req_failed: ["rate<0.01"],
+		checks: ["rate==1"],
+	},
 };
 
-// This e2e validates that every platform shard spins up its own container and
-// runs real k6 code. k6 execution segments may allocate zero default-function
-// iterations to non-leading segments for tiny tests, but setup() runs once per
-// k6 process, so every container shard makes one canonical HTTP request.
-export function setup() {
-	const response = http.get("https://example.com");
+// A tiny but real load pattern: VUs loop for a short duration and each shard
+// owns a k6 execution segment. Defaults are intentionally low for CI/e2e.
+export default function () {
+	const response = http.get(__ENV.TARGET_URL || "https://example.com");
 	check(response, {
 		"status is 200": (res) => res.status === 200,
 	});
+	sleep(1);
 }
-
-export default function () {}

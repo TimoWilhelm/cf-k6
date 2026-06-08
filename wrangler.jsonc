@@ -1,16 +1,22 @@
 {
 	"$schema": "node_modules/wrangler/config-schema.json",
 	"name": "container-loadtester",
+	"workers_dev": true,
 	"main": "src/index.ts",
 	"compatibility_date": "2026-06-05",
-	"compatibility_flags": ["nodejs_compat"],
+	"compatibility_flags": [
+		"nodejs_compat"
+	],
 	"upload_source_maps": true,
 	"observability": {
 		"enabled": true,
 		"head_sampling_rate": 1
 	},
 	"secrets": {
-		"required": ["BASIC_AUTH_USER", "BASIC_AUTH_PASS"]
+		"required": [
+			"BASIC_AUTH_USER",
+			"BASIC_AUTH_PASS"
+		]
 	},
 	"r2_buckets": [
 		{
@@ -23,18 +29,41 @@
 			"name": "container-loadtester-run",
 			"binding": "K6_RUN_WORKFLOW",
 			"class_name": "K6RunWorkflow",
-			"limits": { "steps": 25000 }
+			"limits": {
+				"steps": 25000
+			}
 		}
 	],
 	"durable_objects": {
 		"bindings": [
-			{ "name": "RUN_COORDINATOR", "class_name": "RunCoordinator" },
-			{ "name": "K6_RUNNER_ENAM", "class_name": "K6RunnerENAM" },
-			{ "name": "K6_RUNNER_WNAM", "class_name": "K6RunnerWNAM" },
-			{ "name": "K6_RUNNER_EEUR", "class_name": "K6RunnerEEUR" },
-			{ "name": "K6_RUNNER_WEUR", "class_name": "K6RunnerWEUR" },
-			{ "name": "K6_RUNNER_APAC", "class_name": "K6RunnerAPAC" },
-			{ "name": "K6_RUNNER_SAM", "class_name": "K6RunnerSAM" }
+			{
+				"name": "RUN_COORDINATOR",
+				"class_name": "RunCoordinator"
+			},
+			{
+				"name": "K6_RUNNER_ENAM",
+				"class_name": "K6RunnerENAM"
+			},
+			{
+				"name": "K6_RUNNER_WNAM",
+				"class_name": "K6RunnerWNAM"
+			},
+			{
+				"name": "K6_RUNNER_EEUR",
+				"class_name": "K6RunnerEEUR"
+			},
+			{
+				"name": "K6_RUNNER_WEUR",
+				"class_name": "K6RunnerWEUR"
+			},
+			{
+				"name": "K6_RUNNER_APAC",
+				"class_name": "K6RunnerAPAC"
+			},
+			{
+				"name": "K6_RUNNER_SAM",
+				"class_name": "K6RunnerSAM"
+			}
 		]
 	},
 	"migrations": [
@@ -57,42 +86,66 @@
 			"image": "./Dockerfile",
 			"instance_type": "basic",
 			"max_instances": 50,
-			"constraints": { "regions": ["ENAM"] }
+			"constraints": {
+				"regions": [
+					"ENAM"
+				]
+			}
 		},
 		{
 			"class_name": "K6RunnerWNAM",
 			"image": "./Dockerfile",
 			"instance_type": "basic",
 			"max_instances": 50,
-			"constraints": { "regions": ["WNAM"] }
+			"constraints": {
+				"regions": [
+					"WNAM"
+				]
+			}
 		},
 		{
 			"class_name": "K6RunnerEEUR",
 			"image": "./Dockerfile",
 			"instance_type": "basic",
 			"max_instances": 50,
-			"constraints": { "regions": ["EEUR"] }
+			"constraints": {
+				"regions": [
+					"EEUR"
+				]
+			}
 		},
 		{
 			"class_name": "K6RunnerWEUR",
 			"image": "./Dockerfile",
 			"instance_type": "basic",
 			"max_instances": 50,
-			"constraints": { "regions": ["WEUR"] }
+			"constraints": {
+				"regions": [
+					"WEUR"
+				]
+			}
 		},
 		{
 			"class_name": "K6RunnerAPAC",
 			"image": "./Dockerfile",
 			"instance_type": "basic",
 			"max_instances": 50,
-			"constraints": { "regions": ["APAC"] }
+			"constraints": {
+				"regions": [
+					"APAC"
+				]
+			}
 		},
 		{
 			"class_name": "K6RunnerSAM",
 			"image": "./Dockerfile",
 			"instance_type": "basic",
 			"max_instances": 50,
-			"constraints": { "regions": ["SAM"] }
+			"constraints": {
+				"regions": [
+					"SAM"
+				]
+			}
 		}
 	]
 }

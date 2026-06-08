@@ -1,7 +1,9 @@
-import { SELF } from "cloudflare:test";
+import { env, SELF } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
 
-const AUTH = `Basic ${btoa("test-user:test-pass")}`;
+const AUTH_USER = env.BASIC_AUTH_USER;
+const AUTH_PASS = env.BASIC_AUTH_PASS;
+const AUTH = `Basic ${btoa(`${AUTH_USER}:${AUTH_PASS}`)}`;
 
 function authed(path: string, init: RequestInit = {}): Promise<Response> {
 	return SELF.fetch(`https://example.com${path}`, {

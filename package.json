@@ -8,6 +8,7 @@
 		"start": "wrangler dev",
 		"test": "vitest",
 		"test:e2e": "node test/e2e/run-k6-local.mjs",
+		"test:remote": "node test/e2e/run-k6-remote.mjs",
 		"cf-typegen": "wrangler types"
 	},
 	"dependencies": {

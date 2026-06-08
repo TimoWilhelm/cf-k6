@@ -164,4 +164,20 @@ npm run deploy   # wrangler deploy (builds and pushes the runner image)
 
 ```bash
 npm test         # vitest + @cloudflare/vitest-pool-workers
+npm run test:e2e # local wrangler dev + container-sharded k6 archive test
+npm run test:remote # authenticated remote 3-shard Container run
+```
+
+`npm run test:remote` reads `BASIC_AUTH_USER` and `BASIC_AUTH_PASS` from `.env`
+or `process.env`, targets `https://container-loadtester.tiwicf.workers.dev` by
+default, creates a k6 archive, starts a remote run with three Container
+shards, waits for completion, and verifies per-shard k6 result artifacts.
+
+Override the target, region, or timeout if needed:
+
+```bash
+REMOTE_BASE_URL="https://your-worker.example.com" \
+REMOTE_TEST_REGION="WEUR" \
+REMOTE_TEST_TIMEOUT_MS=600000 \
+npm run test:remote
 ```
