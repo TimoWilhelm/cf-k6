@@ -3,13 +3,16 @@ import { fileURLToPath } from "node:url";
 import { readDotEnv } from "../shared/platform-e2e.mjs";
 
 const env = { ...process.env, ...await readDotEnv(".env") };
-const baseUrl = trimTrailingSlash(env.REMOTE_BASE_URL ?? "https://container-loadtester.tiwicf.workers.dev");
+const baseUrl = env.REMOTE_BASE_URL ? trimTrailingSlash(env.REMOTE_BASE_URL) : undefined;
 const script = env.K6_CLOUD_TEST_SCRIPT ?? fileURLToPath(new URL("./no-load.k6.js", import.meta.url));
 const username = env.BASIC_AUTH_USER;
 const password = env.BASIC_AUTH_PASS;
 
 if (!username || !password) {
 	throw new Error("BASIC_AUTH_USER and BASIC_AUTH_PASS are required in .env or process.env");
+}
+if (!baseUrl) {
+	throw new Error("REMOTE_BASE_URL is required for remote k6 CLI e2e tests");
 }
 
 await assertK6Available();

@@ -1,0 +1,10 @@
+.git
+.github
+.wrangler
+.dev.vars*
+.env*
+node_modules
+coverage
+dist
+*.log
+*.tsbuildinfo

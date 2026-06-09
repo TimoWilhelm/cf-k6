@@ -1,12 +1,29 @@
 {
 	"name": "container-loadtester",
-	"version": "0.0.0",
+	"version": "0.1.0",
+	"description": "k6-native distributed load testing control plane for Cloudflare Workers, Workflows, Durable Objects, R2, and Containers.",
+	"license": "MIT",
 	"private": true,
+	"packageManager": "bun@1.3.14",
+	"engines": {
+		"node": ">=22",
+		"bun": ">=1.3.0"
+	},
+	"keywords": [
+		"cloudflare-workers",
+		"cloudflare-containers",
+		"k6",
+		"load-testing",
+		"hono",
+		"openapi"
+	],
 	"scripts": {
+		"check": "tsc --noEmit && vitest",
 		"dev": "wrangler dev",
 		"deploy": "wrangler deploy",
 		"start": "wrangler dev",
 		"test": "vitest",
+		"typecheck": "tsc --noEmit",
 		"test:e2e": "node test/e2e/local/run.mjs",
 		"test:remote": "node test/e2e/remote/run.mjs",
 		"test:remote:cli": "node test/e2e/remote-k6-cli/run.mjs",
