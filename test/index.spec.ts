@@ -26,6 +26,16 @@ describe("k6 distributed load tester API", () => {
 	it("serves openapi without auth", async () => {
 		const response = await SELF.fetch("https://example.com/openapi.json");
 		expect(response.status).toBe(200);
+		const body = (await response.json()) as { openapi: string; paths: Record<string, unknown>; components?: { schemas?: Record<string, unknown> } };
+		expect(body.openapi).toBe("3.1.0");
+		expect(body.paths["/v1/tests"]).toBeDefined();
+		expect(body.components?.schemas?.RunRecord).toBeDefined();
+	});
+
+	it("serves swagger ui without auth", async () => {
+		const response = await SELF.fetch("https://example.com/docs");
+		expect(response.status).toBe(200);
+		expect(response.headers.get("content-type")).toContain("text/html");
 	});
 
 	it("reports health and supported regions when authed", async () => {

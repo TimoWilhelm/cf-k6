@@ -1,6 +1,6 @@
 import { REGIONS, type Region, type Shard, type TestSpec } from "./types";
 
-const MAX_SHARDS_PER_REGION = 100;
+export const MAX_SHARDS_PER_REGION = 100;
 
 export class SpecError extends Error {}
 

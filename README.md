@@ -69,11 +69,12 @@ and exposes its native REST API plus the raw JSON output file.
 
 ## API
 
-All endpoints require HTTP Basic Auth except `GET /openapi.json`.
+All endpoints require HTTP Basic Auth except `GET /openapi.json` and `GET /docs`.
 
 | Method | Path | Description |
 |--------|------|-------------|
 | `GET` | `/openapi.json` | OpenAPI 3.1 description (public) |
+| `GET` | `/docs` | Swagger UI for the OpenAPI document (public) |
 | `GET` | `/v1/health` | Health + supported regions |
 | `POST` | `/v1/tests` | Create a run (inline JSON **or** archive tar) |
 | `GET` | `/v1/tests` | List runs |
@@ -196,7 +197,11 @@ The authoritative result is the **end-of-test summary**: when every shard's k6
 process exits, the coordinator streams each shard's raw `--out json` NDJSON into
 R2 and recomputes exact aggregate statistics from the merged raw samples —
 identical to what a single k6 instance would report — written to
-`runs/{id}/summary.json` in k6's native summary-export format.
+`runs/{id}/summary.json`. The summary keeps the native k6 `metrics` object and
+adds a top-level `shards` array showing each shard's region, segment, status,
+whether its artifact was included, artifact size, upload time, and NDJSON record
+count. Each shard also includes `links.results`, a reference to the raw shard
+artifact endpoint.
 
 > Workers Analytics Engine is intentionally **not** used for the authoritative
 > numbers: it applies adaptive sampling and extrapolates percentiles, which is

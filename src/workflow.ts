@@ -80,15 +80,25 @@ export class K6RunWorkflow extends WorkflowEntrypoint<Env, K6RunWorkflowParams> 
 
 		for (let poll = 1; poll <= MAX_POLLS; poll++) {
 			await step.sleep(`wait before poll ${poll}`, POLL_INTERVAL);
-			const results = await Promise.all(
-				shardIds.map((shardId: string) =>
-					step.do(`collect shard ${shardId} poll ${poll}`, COLLECT_STEP, async (ctx) => {
-						console.log(JSON.stringify({ msg: "collect shard", runId, shardId, poll, attempt: ctx.attempt }));
-						const result = await coordinator(this.env).collectShard(runId, shardId);
-						return { shardId: result.shardId, status: result.status, running: result.running, error: result.error };
-					}),
-				),
-			) as PollResult[];
+			let results: PollResult[];
+			try {
+				results = await Promise.all(
+					shardIds.map((shardId: string) =>
+						step.do(`collect shard ${shardId} poll ${poll}`, COLLECT_STEP, async (ctx) => {
+							console.log(JSON.stringify({ msg: "collect shard", runId, shardId, poll, attempt: ctx.attempt }));
+							const result = await coordinator(this.env).collectShard(runId, shardId);
+							return { shardId: result.shardId, status: result.status, running: result.running, error: result.error };
+						}),
+					),
+				) as PollResult[];
+			} catch (error) {
+				console.error(JSON.stringify({ msg: "collect fan-out failed", runId, poll, error: String(error) }));
+				await step.do("stop run after collection failure", STATE_STEP, async () => {
+					const run = await coordinator(this.env).stopRun(runId);
+					return { runId: run.id, status: run.status };
+				});
+				return this.finalize(step, runId, "finalize failed collection");
+			}
 
 			if (results.every((result) => !result.running)) {
 				return this.finalize(step, runId, "finalize run");

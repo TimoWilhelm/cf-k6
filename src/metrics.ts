@@ -214,20 +214,28 @@ export class SummaryAccumulator {
 }
 
 /** Parse an R2/NDJSON byte stream line by line, feeding each into `accumulator`. */
-export async function consumeNdjson(stream: ReadableStream<Uint8Array>, accumulator: SummaryAccumulator): Promise<void> {
+export async function consumeNdjson(stream: ReadableStream<Uint8Array>, accumulator: SummaryAccumulator): Promise<number> {
 	const reader = stream.pipeThrough(new TextDecoderStream()).getReader();
 	let buffer = "";
+	let records = 0;
+	const add = (line: string) => {
+		const trimmed = line.trim();
+		if (!trimmed) return;
+		records += 1;
+		accumulator.addLine(trimmed);
+	};
 	for (;;) {
 		const { done, value } = await reader.read();
 		if (done) break;
 		buffer += value;
 		let newline: number;
 		while ((newline = buffer.indexOf("\n")) >= 0) {
-			accumulator.addLine(buffer.slice(0, newline).trim());
+			add(buffer.slice(0, newline));
 			buffer = buffer.slice(newline + 1);
 		}
 	}
-	accumulator.addLine(buffer.trim());
+	add(buffer);
+	return records;
 }
 
 function percentile(sorted: number[], p: number): number {

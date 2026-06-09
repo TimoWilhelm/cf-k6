@@ -5,7 +5,7 @@ import { archiveSpecFromOptions } from "./distribution";
 import { consumeNdjson, mergeLiveMetrics, SummaryAccumulator, type MergedMetrics } from "./metrics";
 import { runnerNamespace } from "./runners";
 import { buildShards } from "./shards";
-import { evaluateThresholds, type SummaryExport, type ThresholdEvaluation } from "./thresholds";
+import { evaluateThresholds, type SummaryExport, type SummaryShard, type ThresholdEvaluation } from "./thresholds";
 import type { RunRecord, RunStatus, Shard, ShardStatus, TestSpec } from "./types";
 
 /** Native k6 `/v1/status` PATCH body (pause/resume/scale/stop). */
@@ -253,9 +253,7 @@ export class RunCoordinator extends DurableObject<Env> {
 
 		run.status = "stopping";
 		this.touch(run);
-		await this.forEachRunning(run, (container) =>
-			container.fetch(stopRequest()).then(() => undefined).catch(() => undefined),
-		);
+		await this.cleanupShards(run.shards);
 		return run;
 	}
 
@@ -281,6 +279,7 @@ export class RunCoordinator extends DurableObject<Env> {
 		if (!artifact.ok || !artifact.body) {
 			if (exitCode) {
 				await this.setShardStatus(id, shardId, "failed");
+				await this.cleanupShard(shard);
 				return { shardId, status: "failed", running: false, error: `k6 exited ${exitCode} without a results artifact` };
 			}
 			throw new Error(`results artifact returned ${artifact.status}`);
@@ -290,6 +289,7 @@ export class RunCoordinator extends DurableObject<Env> {
 
 		const finalStatus = exitCode ? "failed" : "completed";
 		await this.setShardStatus(id, shardId, finalStatus);
+		await this.cleanupShard(shard);
 		return { shardId, status: finalStatus, running: false };
 	}
 
@@ -297,13 +297,28 @@ export class RunCoordinator extends DurableObject<Env> {
 	async finalizeRun(id: string): Promise<RunRecord> {
 		const run = await this.require(id);
 		const accumulator = new SummaryAccumulator();
+		const shards: SummaryShard[] = [];
 
 		for (const shard of run.shards) {
-			const object = await this.env.ARTIFACTS.get(`runs/${run.id}/shards/${shard.id}/results.ndjson`);
-			if (object) await consumeNdjson(object.body, accumulator);
+			const key = `runs/${run.id}/shards/${shard.id}/results.ndjson`;
+			const object = await this.env.ARTIFACTS.get(key);
+			const records = object ? await consumeNdjson(object.body, accumulator) : 0;
+			shards.push({
+				id: shard.id,
+				region: shard.region,
+				index: shard.index,
+				total: shard.total,
+				status: shard.status,
+				segment: shard.segment,
+				sequence: shard.sequence,
+				included: object !== null,
+				records,
+				links: { results: `/v1/tests/${run.id}/shards/${shard.id}/results` },
+				...(object ? { artifact: { key, size: object.size, uploaded: object.uploaded.toISOString() } } : {}),
+			});
 		}
 
-		const summary = accumulator.toSummaryExport();
+		const summary: SummaryExport = { ...accumulator.toSummaryExport(), shards };
 		await this.env.ARTIFACTS.put(`runs/${run.id}/summary.json`, JSON.stringify(summary, null, 2), {
 			httpMetadata: { contentType: "application/json" },
 		});
@@ -326,6 +341,7 @@ export class RunCoordinator extends DurableObject<Env> {
 				cloudRun.test_run_id,
 			);
 		}
+		await this.cleanupShards(run.shards);
 		return run;
 	}
 
@@ -334,6 +350,7 @@ export class RunCoordinator extends DurableObject<Env> {
 		const run = await this.require(id);
 		const shards = await Promise.all(
 			run.shards.map(async (shard) => {
+				if (shard.status !== "running") return { shard, attrs: {} as Record<string, unknown>, reachable: false };
 				try {
 					const response = await this.shardContainer(shard).fetch(k6Request("/v1/status"));
 					const body = (await response.json()) as { data?: { attributes?: Record<string, unknown> } };
@@ -366,7 +383,7 @@ export class RunCoordinator extends DurableObject<Env> {
 	async getMetrics(id: string): Promise<MergedMetrics> {
 		const run = await this.require(id);
 		const responses = await Promise.all(
-			run.shards.map(async (shard) => {
+			run.shards.filter((shard) => shard.status === "running").map(async (shard) => {
 				try {
 					const response = await this.shardContainer(shard).fetch(k6Request("/v1/metrics"));
 					return response.ok ? await response.json() : null;
@@ -380,6 +397,11 @@ export class RunCoordinator extends DurableObject<Env> {
 
 	/** Forward a PATCH /v1/status (pause/resume/scale/stop) to every shard. */
 	async patchStatus(id: string, body: StatusPatch): Promise<AggregateStatus> {
+		if (body.data?.attributes?.stopped === true) {
+			await this.stopRun(id);
+			return this.getStatus(id);
+		}
+
 		const run = await this.require(id);
 		await this.forEachRunning(run, (container) =>
 			container
@@ -395,6 +417,7 @@ export class RunCoordinator extends DurableObject<Env> {
 		const run = await this.require(id);
 		const shard = run.shards.find((candidate) => candidate.id === shardId);
 		if (!shard) return Response.json({ error: "unknown shard" }, { status: 404 });
+		if (shard.status !== "running") return Response.json({ error: "shard is not running" }, { status: 409 });
 		const init: RequestInit = { method };
 		if (body && body.byteLength > 0) {
 			init.body = body;
@@ -456,6 +479,20 @@ export class RunCoordinator extends DurableObject<Env> {
 
 	private async forEachRunning(run: RunRecord, fn: (container: ReturnType<RunCoordinator["shardContainer"]>) => Promise<void>): Promise<void> {
 		await Promise.all(run.shards.filter((shard) => shard.status === "running").map((shard) => fn(this.shardContainer(shard))));
+	}
+
+	private async cleanupShards(shards: Shard[]): Promise<void> {
+		await Promise.all(shards.map((shard) => this.cleanupShard(shard)));
+	}
+
+	private async cleanupShard(shard: Shard): Promise<void> {
+		const container = this.shardContainer(shard);
+		try {
+			await container.destroy();
+		} catch (error) {
+			console.warn(JSON.stringify({ msg: "container destroy failed", runId: shard.runId, shardId: shard.id, error: String(error) }));
+			await container.fetch(stopRequest()).then(() => undefined).catch(() => undefined);
+		}
 	}
 
 	private async require(id: string): Promise<RunRecord> {
@@ -655,6 +692,13 @@ function parseK6Duration(value: string): number {
 
 function renderSummaryText(summary: SummaryExport, evaluation: ThresholdEvaluation): string[] {
 	const lines = ["", "aggregated k6 summary (all remote shards)", "========================================"];
+	if (summary.shards?.length) {
+		lines.push("", "shards");
+		for (const shard of summary.shards) {
+			const artifact = shard.included ? `${shard.records} records` : "missing results";
+			lines.push(`${shard.id} ${shard.region} ${shard.segment} ${shard.status} ${artifact} ${shard.links.results}`);
+		}
+	}
 	for (const [name, stats] of Object.entries(summary.metrics).sort(([a], [b]) => a.localeCompare(b))) {
 		lines.push(`${name}: ${Object.entries(stats).map(([key, value]) => `${key}=${formatMetric(value)}`).join(" ")}`);
 	}

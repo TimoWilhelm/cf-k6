@@ -1,6 +1,20 @@
 import type { K6Options } from "./types";
 
-export type SummaryExport = { metrics: Record<string, Record<string, number>> };
+export type SummaryShard = {
+	id: string;
+	region: string;
+	index: number;
+	total: number;
+	status: string;
+	segment: string;
+	sequence: string;
+	included: boolean;
+	records: number;
+	links: { results: string };
+	artifact?: { key: string; size: number; uploaded: string };
+};
+
+export type SummaryExport = { metrics: Record<string, Record<string, number>>; shards?: SummaryShard[] };
 
 export type ThresholdEvaluation = {
 	passed: boolean;
