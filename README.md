@@ -8,6 +8,37 @@ Built on the open source [k6](https://k6.io) load testing tool ([source](https:/
 
 > Not affiliated with or endorsed by Grafana Labs or the k6 project. "k6" is a trademark of Grafana Labs.
 
+## Architecture
+
+```
+            Client
+              │ Basic Auth
+              ▼
+   ┌──────────────────────┐
+   │      Worker API      │
+   │   (Hono + OpenAPI)   │
+   └───────────┬──────────┘
+               │ start
+               ▼
+   ┌──────────────────────┐       poll        ┌──────────────────────┐
+   │     K6RunWorkflow    │ ────────────────► │     RunCoordinator   │
+   │      (Workflow)      │                   │    (Durable Object)  │
+   └───────────┬──────────┘                   └───────────┬──────────┘
+               │                                          │ launch shards
+               │                                          ▼
+               │                        ┌──────────────────────────────────┐
+               │                        │       k6 Runner Containers       │
+               │                        │   (segments, one set per region) │
+               │                        └─────────────────┬────────────────┘
+               │ merged summary                           │ NDJSON results
+               ▼                                          ▼
+   ┌───────────────────────────────────────────────────────────────────────┐
+   │                              R2 Artifacts                             │
+   └───────────────────────────────────────────────────────────────────────┘
+```
+
+Each run is split into execution-segment shards, launched in parallel across regional container runners. The Workflow polls the coordinator until every shard finishes, then merges a final k6 summary. Raw per-shard results and the merged summary are stored in R2.
+
 ## Features
 
 - Hono API with OpenAPI at `/openapi.json` and Swagger UI at `/docs`.
