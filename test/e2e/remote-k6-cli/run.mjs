@@ -4,7 +4,7 @@ import { readDotEnv } from "../shared/platform-e2e.mjs";
 
 const env = { ...process.env, ...await readDotEnv(".env") };
 const baseUrl = env.REMOTE_BASE_URL ? trimTrailingSlash(env.REMOTE_BASE_URL) : undefined;
-const script = env.K6_CLOUD_TEST_SCRIPT ?? fileURLToPath(new URL("./no-load.k6.js", import.meta.url));
+const script = env.K6_CLOUD_TEST_SCRIPT ?? fileURLToPath(new URL("./light-load.k6.js", import.meta.url));
 const username = env.BASIC_AUTH_USER;
 const password = env.BASIC_AUTH_PASS;
 
