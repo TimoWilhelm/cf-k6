@@ -1,8 +1,12 @@
 # k6 Distributed Load Tester
 
-A small Cloudflare Workers control plane for running normal k6 tests across multiple Cloudflare Container shards.
+A small Cloudflare Workers control plane for running distributed k6 tests across multiple Cloudflare Container shards.
 
 It uses Workers, Hono, OpenAPI, Workflows, Durable Objects, R2, and Containers. Test input stays k6-native: inline scripts or `k6 archive` tar files.
+
+Built on the open source [k6](https://k6.io) load testing tool ([source](https://github.com/grafana/k6), [docs](https://grafana.com/docs/k6/latest/)).
+
+> Not affiliated with or endorsed by Grafana Labs or the k6 project. "k6" is a trademark of Grafana Labs.
 
 ## Features
 
@@ -121,7 +125,7 @@ REMOTE_BASE_URL="https://your-worker.example.com" bun run test:remote:cli
 
 ## Notes
 
-- This is early-stage infrastructure software. Review Cloudflare limits and costs before running large tests.
+- Review Cloudflare limits and pricing before running large tests.
 - The `/cloud/v6/*` compatibility surface targets the k6 CLI behavior used by `k6 cloud run`; pin and test k6 versions in production.
 - Configure R2 lifecycle rules if you do not want run artifacts retained indefinitely.
 

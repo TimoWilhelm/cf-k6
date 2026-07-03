@@ -45,7 +45,9 @@ app.doc31("/openapi.json", {
 	info: {
 		title: "k6 Distributed Load Tester",
 		version: "1.0.0",
-		description: "Run standard k6 tests distributed across Cloudflare regions. Lifecycle is managed by Cloudflare Workflows. Authenticated with HTTP Basic Auth.",
+		description:
+			"Run standard k6 tests distributed across Cloudflare regions. Lifecycle is managed by Cloudflare Workflows. Authenticated with HTTP Basic Auth.\n\n" +
+			"Not affiliated with or endorsed by Grafana Labs or the k6 project (https://k6.io).",
 	},
 	security: [{ basicAuth: [] }],
 	"x-supported-regions": REGIONS,
